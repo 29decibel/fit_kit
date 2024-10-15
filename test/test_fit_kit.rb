@@ -10,7 +10,7 @@ class TestFitKit < Minitest::Test
 
   def test_parse_fit_file
     puts Dir.pwd
-    test_fit_file = File.join(Dir.pwd, "example.fit")
+    test_fit_file = File.join(Dir.pwd, "test/fixtures/example.fit")
     fit_data_records = ::FitKit.parse_fit_file(test_fit_file)
     assert_equal(fit_data_records.size, 2378, "Parse fit file records should match")
     # check the record type
