@@ -8,7 +8,7 @@ Gem::Specification.new do |spec|
   spec.authors = ["29decibel"]
   spec.email = ["m@idots.me"]
 
-  spec.summary = "Garmin fit file parser wrapping Rust crate fitparse_rs."
+  spec.summary = "Ruby gem to parse Garmin fit file."
   spec.description = "Garmin fit file parser wrapping Rust crate fitparse_rs."
   spec.homepage = "https://github.com/29decibel/fit_kit"
   spec.license = "MIT"
@@ -19,7 +19,7 @@ Gem::Specification.new do |spec|
 
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = "https://github.com/29decibel/fit_kit"
-  spec.metadata["changelog_uri"] = "https://github.com/29decibel/fit_kit"
+  spec.metadata["changelog_uri"] = "https://github.com/29decibel/fit_kit/CHANGELOG.md"
 
   # Specify which files should be added to the gem when it is released.
   # The `git ls-files -z` loads the files in the RubyGem that have been added into git.
