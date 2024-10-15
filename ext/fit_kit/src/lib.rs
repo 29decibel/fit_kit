@@ -2,10 +2,6 @@ use fitparser::{self, FitDataField, FitDataRecord, Value};
 use magnus::{function, method, prelude::*, Error, IntoValue, RArray, Ruby};
 use std::fs::File;
 
-fn hello(subject: String) -> String {
-    format!("Hello from Rust, {subject}!")
-}
-
 ///////////////////////// RFitDataField ///////////////////////////
 // define a wrapper ruby class for FitDataField
 #[magnus::wrap(class = "RFitDataField")]
@@ -14,7 +10,7 @@ struct RFitDataField(FitDataField);
 // recursive method to turn Fit value into magnus::Value
 fn value_to_rb_value(value: &Value) -> magnus::Value {
     match value {
-        Value::Timestamp(t) => t.to_string().into_value(),
+        Value::Timestamp(t) => t.timestamp().into_value(),
         Value::SInt8(i) => i.into_value(),
         Value::UInt8(u) => u.into_value(),
         Value::SInt16(i) => i.into_value(),
@@ -70,8 +66,9 @@ impl RFitDataRecord {
     }
 }
 
-// now let's define the class
-fn define_fit_data_field(ruby: &Ruby) -> Result<(), magnus::Error> {
+// Here we define two ruby classes
+// RFitDataRecord and RFitDataField
+fn define_ruby_classes(ruby: &Ruby) -> Result<(), magnus::Error> {
     let class = ruby.define_class("RFitDataField", ruby.class_object())?;
 
     // define bunch of methods
@@ -108,10 +105,8 @@ fn parse_fit_file(file_path: String) -> Result<RArray, magnus::Error> {
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
     let module = ruby.define_module("FitKit")?;
-    // cool stuff
-    let _ = define_fit_data_field(&ruby);
+    let _ = define_ruby_classes(&ruby);
 
-    module.define_singleton_method("hello", function!(hello, 1))?;
     module.define_singleton_method("parse_fit_file", function!(parse_fit_file, 1))?;
 
     Ok(())
