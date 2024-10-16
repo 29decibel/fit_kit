@@ -104,6 +104,33 @@ impl FitParseResult {
         (elevation_gain_sum, String::from(units))
     }
 
+    fn partition_stats_for_fields(
+        &self,
+        by_field: String,
+        partition_distance: f64,
+        fields: Vec<String>,
+    ) -> Vec<(String, (f64, String))> {
+        // first get the partitions
+        let partition_indices = self.calculate_partition_indices(partition_distance, by_field);
+
+        partition_indices.windows(2).map(|window| {
+            let start = window[0];
+            let end = window[1];
+            let partition_records = &self.0[start..=end];
+
+            // ok we have this, now we can map the resulf the field
+            fields
+                .iter()
+                .map(|field_name: String| {
+                    (
+                        field_name,
+                        self.avg_for_records(partition_records, field_name),
+                    )
+                }).
+                .collect()
+        })
+    }
+
     fn avg_for_records(&self, records: &Vec<FitDataRecord>, field_name: String) -> (f64, String) {
         // only get the record types
         let fields: Vec<&FitDataField> = records
