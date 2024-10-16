@@ -59,4 +59,9 @@ class TestFitKit < Minitest::Test
     assert_equal([2.816479709525839, "m/s"], fit_data_records.avg_for("enhanced_speed"), "Avg speed should match")
     assert_equal([210.02134016218523, "watts"], fit_data_records.avg_for("power"), "Avg power should match")
   end
+
+  def test_partition_distance_records
+    partition_indices = fit_data_records.calculate_partition_indices(1600, "distance")
+    assert_equal([0, 575, 1104, 1693, 2281, 2354], partition_indices)
+  end
 end

@@ -131,6 +131,60 @@ impl FitParseResult {
             (avg_value, String::from(units))
         }
     }
+
+    fn calculate_partition_indices(
+        &self,
+        partition_distance: f64,
+        field_name: String,
+    ) -> Vec<usize> {
+        let records: Vec<&FitDataRecord> = self
+            .0
+            .iter()
+            .filter(|r| r.kind() == MesgNum::Record)
+            .collect();
+        self.calculate_partition_indices_for_records(records, partition_distance, field_name)
+    }
+
+    fn calculate_partition_indices_for_records(
+        &self,
+        records: Vec<&FitDataRecord>,
+        partition_distance: f64,
+        field_name: String,
+    ) -> Vec<usize> {
+        let mut partition_indices = vec![0]; // always start include the start index
+        let mut start_distance = 0.0;
+
+        // let's loop
+        for (index, record) in records.iter().enumerate().skip(1) {
+            let fields: Vec<&FitDataField> = record
+                .fields()
+                .iter()
+                .filter(|f| f.name() == field_name)
+                .collect();
+
+            let distance_field = fields
+                .first()
+                .and_then(|f| MyValue(f.value().clone()).as_f64());
+            match distance_field {
+                Some(distance_value) => {
+                    if distance_value - start_distance >= partition_distance {
+                        // found it
+                        partition_indices.push(index);
+                        start_distance = distance_value;
+                    }
+                }
+                None => {}
+            }
+        }
+
+        // now we have the whole array
+        // if the last record is not there, add it
+        if *partition_indices.last().unwrap() != records.len() - 1 {
+            partition_indices.push(records.len() - 1);
+        }
+
+        partition_indices
+    }
 }
 
 // recursive method to turn Fit value into magnus::Value
@@ -189,6 +243,10 @@ fn define_ruby_classes(ruby: &Ruby) -> Result<(), magnus::Error> {
     data_record_class.define_method("avg_for", method!(FitParseResult::avg_for, 1))?;
     data_record_class
         .define_method("elevation_gain", method!(FitParseResult::elevation_gain, 1))?;
+    data_record_class.define_method(
+        "calculate_partition_indices",
+        method!(FitParseResult::calculate_partition_indices, 2),
+    )?;
 
     Ok(())
 }
