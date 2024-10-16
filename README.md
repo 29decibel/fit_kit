@@ -17,7 +17,7 @@ If bundler is not being used to manage dependencies, install the gem by executin
 ```ruby
 test_fit_file = File.join(Dir.pwd, "example.fit")
 fit_data_records = ::FitKit.parse_fit_file(test_fit_file)
-# [RFitDataRecord, RFitDataRecord, RFitDataRecord ...]
+# { record: [{...}, {...}], session: [{...}], lap: [..], activity: [...] }
 ```
 
 ## Performance
