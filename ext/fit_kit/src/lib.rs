@@ -1,5 +1,6 @@
 use fitparser::{self, FitDataRecord, Value};
-use magnus::{function, method, prelude::*, Error, IntoValue, RArray, RHash, Ruby, Symbol};
+use itertools::Itertools;
+use magnus::{function, prelude::*, Error, IntoValue, RArray, RHash, Ruby, Symbol};
 use std::fs::File;
 
 // recursive method to turn Fit value into magnus::Value
@@ -33,43 +34,22 @@ fn value_to_rb_value(value: &Value) -> magnus::Value {
     }
 }
 
-///////////////////////// RFitDataRecord ///////////////////////////
-#[magnus::wrap(class = "RFitDataRecord")]
-struct RFitDataRecord(FitDataRecord);
-
-impl RFitDataRecord {
-    fn kind(&self) -> String {
-        self.0.kind().to_string()
+fn get_fields_hash(record: &FitDataRecord) -> RHash {
+    let hash = RHash::new();
+    for field in record.fields() {
+        let value = value_to_rb_value(field.value());
+        let pair = RHash::new();
+        pair.aset(Symbol::new("units"), field.units()).unwrap();
+        pair.aset(Symbol::new("value"), value).unwrap();
+        // here we add the stuff to the hash
+        let field_name_symbol = Symbol::new(field.name());
+        hash.aset(field_name_symbol, pair).unwrap();
     }
 
-    fn fields_hash(&self) -> RHash {
-        let hash = RHash::new();
-        for field in self.0.fields() {
-            let value = value_to_rb_value(field.value());
-            let pair = RHash::new();
-            pair.aset(Symbol::new("units"), field.units()).unwrap();
-            pair.aset(Symbol::new("value"), value).unwrap();
-            // here we add the stuff to the hash
-            let field_name_symbol = Symbol::new(field.name());
-            hash.aset(field_name_symbol, pair).unwrap();
-        }
-
-        hash
-    }
+    hash
 }
 
-// Here we define two ruby classes
-// RFitDataRecord and RFitDataField
-fn define_ruby_classes(ruby: &Ruby) -> Result<(), magnus::Error> {
-    // definie the the other one here
-    let data_record_class = ruby.define_class("RFitDataRecord", ruby.class_object())?;
-    data_record_class.define_method("kind", method!(RFitDataRecord::kind, 0))?;
-    data_record_class.define_method("fields_hash", method!(RFitDataRecord::fields_hash, 0))?;
-
-    Ok(())
-}
-
-fn parse_fit_file(file_path: String) -> Result<RArray, magnus::Error> {
+fn parse_fit_file(file_path: String) -> Result<RHash, magnus::Error> {
     let mut fp = File::open(file_path)
         .map_err(|e| Error::new(Ruby::get().unwrap().exception_io_error(), e.to_string()))?;
     let data = fitparser::from_reader(&mut fp).map_err(|e| {
@@ -79,19 +59,30 @@ fn parse_fit_file(file_path: String) -> Result<RArray, magnus::Error> {
         )
     })?;
 
-    // finally we have the result array of record
-    let array = RArray::new();
-    for record in data {
-        array.push(RFitDataRecord(record)).unwrap();
+    // now let's group by the record by kind
+    let result_hash = RHash::new();
+    for (kind, kind_records) in data
+        .iter()
+        .chunk_by(|record| record.kind().to_string())
+        .into_iter()
+    {
+        // turn records into rarray
+        let array = RArray::new();
+        for record in kind_records {
+            // TODO here do not pass RFitDataRecord
+            // turn it into fields_hash directly
+            array.push(get_fields_hash(record)).unwrap();
+        }
+
+        result_hash.aset(Symbol::new(kind), array).unwrap();
     }
 
-    Ok(array)
+    Ok(result_hash)
 }
 
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
     let module = ruby.define_module("FitKit")?;
-    let _ = define_ruby_classes(&ruby);
 
     module.define_singleton_method("parse_fit_file", function!(parse_fit_file, 1))?;
 

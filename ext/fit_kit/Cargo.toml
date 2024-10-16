@@ -11,4 +11,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 fitparser = "0.7.0"
+itertools = "0.13.0"
 magnus = { version = "0.6.2" }
