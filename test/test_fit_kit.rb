@@ -64,4 +64,29 @@ class TestFitKit < Minitest::Test
     partition_indices = fit_data_records.calculate_partition_indices(1600, "distance")
     assert_equal([0, 575, 1104, 1693, 2281, 2354], partition_indices)
   end
+
+  def test_split_avg_stats
+    stats = fit_data_records.partition_stats_for_fields("distance", 1600, ["heart_rate", "cadence", "enhanced_speed", "power"])
+    expected = [[["heart_rate", [126.70692717584369, "bpm"]],
+      ["cadence", [91.2980251346499, "rpm"]],
+      ["enhanced_speed", [2.7501938958707344, "m/s"]],
+      ["power", [205.21824686940965, "watts"]]],
+      [["heart_rate", [124.12641509433962, "bpm"]],
+        ["cadence", [92.08490566037736, "rpm"]],
+        ["enhanced_speed", [3.0754490566037753, "m/s"]],
+        ["power", [208.6867924528302, "watts"]]],
+      [["heart_rate", [128.69296740994855, "bpm"]],
+        ["cadence", [89.79381443298969, "rpm"]],
+        ["enhanced_speed", [2.770613402061855, "m/s"]],
+        ["power", [222.10824742268042, "watts"]]],
+      [["heart_rate", [131.4804753820034, "bpm"]],
+        ["cadence", [85.44482173174873, "rpm"]],
+        ["enhanced_speed", [2.6420152801358245, "m/s"]],
+        ["power", [201.68081494057725, "watts"]]],
+      [["heart_rate", [134.13513513513513, "bpm"]],
+        ["cadence", [91.08108108108108, "rpm"]],
+        ["enhanced_speed", [3.1840675675675674, "m/s"]],
+        ["power", [223.8108108108108, "watts"]]]]
+    assert_equal(expected, stats)
+  end
 end
