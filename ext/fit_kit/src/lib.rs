@@ -1,11 +1,6 @@
-use fitparser::{self, FitDataField, FitDataRecord, Value};
-use magnus::{function, method, prelude::*, Error, IntoValue, RArray, Ruby};
+use fitparser::{self, FitDataRecord, Value};
+use magnus::{function, method, prelude::*, Error, IntoValue, RArray, RHash, Ruby, Symbol};
 use std::fs::File;
-
-///////////////////////// RFitDataField ///////////////////////////
-// define a wrapper ruby class for FitDataField
-#[magnus::wrap(class = "RFitDataField")]
-struct RFitDataField(FitDataField);
 
 // recursive method to turn Fit value into magnus::Value
 fn value_to_rb_value(value: &Value) -> magnus::Value {
@@ -38,16 +33,6 @@ fn value_to_rb_value(value: &Value) -> magnus::Value {
     }
 }
 
-impl RFitDataField {
-    fn name(&self) -> String {
-        self.0.name().to_string()
-    }
-
-    fn value(&self) -> magnus::Value {
-        value_to_rb_value(self.0.value())
-    }
-}
-
 ///////////////////////// RFitDataRecord ///////////////////////////
 #[magnus::wrap(class = "RFitDataRecord")]
 struct RFitDataRecord(FitDataRecord);
@@ -57,28 +42,29 @@ impl RFitDataRecord {
         self.0.kind().to_string()
     }
 
-    fn fields(&self) -> RArray {
-        let array = RArray::new();
+    fn fields_hash(&self) -> RHash {
+        let hash = RHash::new();
         for field in self.0.fields() {
-            array.push(RFitDataField(field.clone())).unwrap();
+            let value = value_to_rb_value(field.value());
+            let pair = RHash::new();
+            pair.aset(Symbol::new("units"), field.units()).unwrap();
+            pair.aset(Symbol::new("value"), value).unwrap();
+            // here we add the stuff to the hash
+            let field_name_symbol = Symbol::new(field.name());
+            hash.aset(field_name_symbol, pair).unwrap();
         }
-        array
+
+        hash
     }
 }
 
 // Here we define two ruby classes
 // RFitDataRecord and RFitDataField
 fn define_ruby_classes(ruby: &Ruby) -> Result<(), magnus::Error> {
-    let class = ruby.define_class("RFitDataField", ruby.class_object())?;
-
-    // define bunch of methods
-    class.define_method("name", method!(RFitDataField::name, 0))?;
-    class.define_method("value", method!(RFitDataField::value, 0))?;
-
     // definie the the other one here
     let data_record_class = ruby.define_class("RFitDataRecord", ruby.class_object())?;
     data_record_class.define_method("kind", method!(RFitDataRecord::kind, 0))?;
-    data_record_class.define_method("fields", method!(RFitDataRecord::fields, 0))?;
+    data_record_class.define_method("fields_hash", method!(RFitDataRecord::fields_hash, 0))?;
 
     Ok(())
 }
