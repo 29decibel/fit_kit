@@ -14,3 +14,5 @@ mkmf.log
 target/
 
 *.gem
+
+.DS_Store
