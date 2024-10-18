@@ -136,6 +136,85 @@ impl FitParseResult {
             .collect()
     }
 
+    fn zone_time_for(&self, zones: Vec<(f64, f64)>, field_name: String) -> Vec<((f64, f64), f64)> {
+        // filter records
+        let filtered_records: Vec<&FitDataRecord> = self
+            .0
+            .iter()
+            .filter(|r| r.kind() == MesgNum::Record)
+            .filter(|r| r.fields().iter().any(|f| f.name() == field_name))
+            .collect();
+        self.zone_time_for_records(filtered_records, zones, field_name)
+    }
+
+    /// Given a list of records, and list of zones, calculate the time spent in each zone
+    fn zone_time_for_records(
+        &self,
+        records: Vec<&FitDataRecord>,
+        zones: Vec<(f64, f64)>,
+        field_name: String,
+    ) -> Vec<((f64, f64), f64)> {
+        let mut zone_times: Vec<((f64, f64), f64)> =
+            zones.iter().map(|z| (z.clone(), 0.0)).collect();
+
+        for window in records.windows(2) {
+            let value1 = window[1]
+                .fields()
+                .iter()
+                .find(|f| f.name() == field_name)
+                .unwrap()
+                .value();
+
+            // using MyValue to extract the value
+            let value1 = match MyValue(value1.clone()).as_f64() {
+                Some(v) => v,
+                None => continue,
+            };
+
+            // we need to find the zone from start again
+            // because the value could drop below the current zone
+            // always reset the current zone index to 0
+            let mut current_zone_index = 0;
+            while current_zone_index < zones.len() - 1 && value1 > zones[current_zone_index].1 {
+                // moving to next zone
+                // as current zone index is less than the last zone
+                // also the value is greater than the current zone's max
+                current_zone_index += 1;
+            }
+
+            // find the timestamp value
+            let timestamp1 = window[1]
+                .fields()
+                .iter()
+                .find(|f| f.name() == "timestamp")
+                .unwrap()
+                .value();
+
+            let timestamp1_value = match timestamp1 {
+                Value::Timestamp(t) => t.timestamp(),
+                _ => continue,
+            };
+
+            let timestamp0 = window[0]
+                .fields()
+                .iter()
+                .find(|f| f.name() == "timestamp")
+                .unwrap()
+                .value();
+
+            let timestamp0_value = match timestamp0 {
+                Value::Timestamp(t) => t.timestamp(),
+                _ => continue,
+            };
+
+            let time_diff = timestamp1_value - timestamp0_value;
+            zone_times[current_zone_index].1 += time_diff as f64;
+        }
+
+        zone_times
+    }
+
+    /// Calculate the average for a given field name for a list of records
     fn avg_for_records(&self, records: &Vec<FitDataRecord>, field_name: String) -> (f64, String) {
         // only get the record types
         let fields: Vec<&FitDataField> = records
@@ -177,6 +256,7 @@ impl FitParseResult {
         self.calculate_partition_indices_for_records(records, partition_distance, field_name)
     }
 
+    /// Given a list of records, calculate the partition indices based on the field name and partition distance
     fn calculate_partition_indices_for_records(
         &self,
         records: Vec<&FitDataRecord>,
@@ -284,6 +364,8 @@ fn define_ruby_classes(ruby: &Ruby) -> Result<(), magnus::Error> {
         "partition_stats_for_fields",
         method!(FitParseResult::partition_stats_for_fields, 3),
     )?;
+
+    data_record_class.define_method("zone_time_for", method!(FitParseResult::zone_time_for, 2))?;
 
     Ok(())
 }

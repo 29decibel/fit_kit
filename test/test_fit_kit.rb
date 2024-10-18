@@ -8,12 +8,12 @@ class TestFitKit < Minitest::Test
     refute_nil ::FitKit::VERSION
   end
 
-  def fit_file_fixture
-    File.join(Dir.pwd, "test/fixtures/example.fit")
+  def fit_file_fixture(fit_file)
+    File.join(Dir.pwd, "test/fixtures/#{fit_file}")
   end
 
-  def fit_data_records
-    @parsed_fit_file ||= ::FitKit.parse_fit_file(fit_file_fixture)
+  def fit_data_records(fit_file = "example.fit")
+    @parsed_fit_file ||= ::FitKit.parse_fit_file(fit_file_fixture(fit_file))
   end
 
   def test_parse_fit_file
@@ -88,5 +88,20 @@ class TestFitKit < Minitest::Test
         ["enhanced_speed", [3.1840675675675674, "m/s"]],
         ["power", [223.8108108108108, "watts"]]]]
     assert_equal(expected, stats)
+  end
+
+  def test_zone_time_for
+    records = fit_data_records("apple-watch-example.fit")
+    zone_times = records.zone_time_for([
+      [0, 124],
+      [125, 138],
+      [139, 152],
+      [153, 165],
+      [166, 250]
+    ], "heart_rate")
+    zone_times.map { |zone| puts "Zone: #{zone[0][0]} - #{zone[0][1]}: #{zone[1]} (#{zone[1] / 60} mins)" }
+    assert_equal(5, zone_times.size)
+    actual = [[[0.0, 124.0], 2099.0], [[125.0, 138.0], 1431.0], [[139.0, 152.0], 384.0], [[153.0, 165.0], 0.0], [[166.0, 250.0], 0.0]]
+    assert_equal(actual, zone_times)
   end
 end
