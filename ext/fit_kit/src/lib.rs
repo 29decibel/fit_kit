@@ -1,7 +1,113 @@
 use fitparser::{self, profile::MesgNum, FitDataField, FitDataRecord, Value};
 use itertools::Itertools;
 use magnus::{function, method, prelude::*, Error, IntoValue, RArray, RHash, Ruby, Symbol};
-use std::fs::File;
+use std::{collections::BTreeMap, fs::File};
+
+/// Extesnion methods for FitDataRecord
+pub trait FitDataRecordExt {
+    fn timestamp(&self) -> Option<i64>;
+    fn field_value(&self, field_name: &str) -> Option<(Value, String)>;
+}
+
+impl FitDataRecordExt for FitDataRecord {
+    fn timestamp(&self) -> Option<i64> {
+        self.fields()
+            .iter()
+            .find(|field| field.name() == "timestamp")
+            .and_then(|field| match field.value() {
+                Value::Timestamp(v) => Some(v.timestamp()),
+                _ => None,
+            })
+            .map(|v| v as i64)
+    }
+
+    fn field_value(&self, field_name: &str) -> Option<(Value, String)> {
+        let field = self
+            .fields()
+            .iter()
+            .find(|field| field.name() == field_name)?;
+
+        Some((field.value().clone(), field.units().to_string()))
+    }
+}
+
+/// extension methods for vec of FitDataRecord
+pub trait FitDataRecordVecExt {
+    fn sample_series_for_records(&self, field_name: String, num_of_points: u16) -> Vec<(i64, f64)>;
+    fn aggregate_field_values(&self, records: Vec<&FitDataRecord>, field: &str) -> f64;
+}
+
+impl FitDataRecordVecExt for Vec<FitDataRecord> {
+    fn sample_series_for_records(&self, field_name: String, num_of_points: u16) -> Vec<(i64, f64)> {
+        // if there are no records, return empty vec
+        if self.is_empty() {
+            return vec![];
+        }
+
+        // find the min and max timestamp
+        let min_timestamp = self
+            .iter()
+            .find(|r| r.kind() == MesgNum::Record && r.timestamp().is_some())
+            .and_then(|r| r.timestamp());
+
+        let max_timestamp = self
+            .iter()
+            .rev()
+            .find(|r| r.kind() == MesgNum::Record && r.timestamp().is_some())
+            .and_then(|r| r.timestamp());
+
+        // if both exists and min is less than max, we proceed
+        // otherwise return empty vec
+        let (min, max) = match (min_timestamp, max_timestamp) {
+            (Some(min), Some(max)) if min < max => (min, max),
+            _ => return vec![],
+        };
+
+        print!("min: {:?}, max: {:?}", min, max);
+
+        // calculate the interval we need to sample
+        let total_duration_in_seconds = max - min;
+        let interval = total_duration_in_seconds / num_of_points as i64;
+
+        // now we can group them into buckets
+        let mut sample_data = BTreeMap::new();
+        for record in self.into_iter().filter(|r| r.timestamp().is_some()) {
+            let timestamp = record.timestamp().unwrap() as i64;
+            let bucket = ((timestamp - min) / interval as i64) as u16;
+            // insert it into the bucket
+            sample_data.entry(bucket).or_insert(vec![]).push(record);
+        }
+
+        // now we can sample the data
+        sample_data
+            .into_iter()
+            .map(|(bucket, records)| {
+                let timestamp = min + (bucket as i64 * interval) as i64;
+                let value = self.aggregate_field_values(records, &field_name);
+                (timestamp, value)
+            })
+            .collect()
+    }
+
+    fn aggregate_field_values(&self, records: Vec<&FitDataRecord>, field: &str) -> f64 {
+        // Use the new field method
+        let values: Vec<f64> = records
+            .iter()
+            .filter_map(|record| {
+                record
+                    .field_value(field)
+                    .and_then(|(v, _)| MyValue(v).as_f64())
+            })
+            .collect();
+
+        // Calculate average (or use another aggregation method)
+        if values.is_empty() {
+            0.0
+        } else {
+            values.iter().sum::<f64>() / values.len() as f64
+        }
+    }
+}
 
 // wrap fitparse value
 struct MyValue(Value);
@@ -214,6 +320,10 @@ impl FitParseResult {
         zone_times
     }
 
+    fn sample_series_for_records(&self, field_name: String, num_of_points: u16) -> Vec<(i64, f64)> {
+        self.0.sample_series_for_records(field_name, num_of_points)
+    }
+
     /// Calculate the average for a given field name for a list of records
     fn avg_for_records(&self, records: &Vec<FitDataRecord>, field_name: String) -> (f64, String) {
         // only get the record types
@@ -363,6 +473,11 @@ fn define_ruby_classes(ruby: &Ruby) -> Result<(), magnus::Error> {
     data_record_class.define_method(
         "partition_stats_for_fields",
         method!(FitParseResult::partition_stats_for_fields, 3),
+    )?;
+
+    data_record_class.define_method(
+        "sample_series_for_records",
+        method!(FitParseResult::sample_series_for_records, 2),
     )?;
 
     data_record_class.define_method("zone_time_for", method!(FitParseResult::zone_time_for, 2))?;
