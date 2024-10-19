@@ -33,12 +33,12 @@ impl FitDataRecordExt for FitDataRecord {
 
 /// extension methods for vec of FitDataRecord
 pub trait FitDataRecordVecExt {
-    fn sample_series_for_records(&self, field_name: String, num_of_points: u16) -> Vec<(u64, f64)>;
+    fn sample_series_for_records(&self, field_name: String, num_of_points: u16) -> Vec<(i64, f64)>;
     fn aggregate_field_values(&self, records: Vec<&FitDataRecord>, field: &str) -> f64;
 }
 
 impl FitDataRecordVecExt for Vec<FitDataRecord> {
-    fn sample_series_for_records(&self, field_name: String, num_of_points: u16) -> Vec<(u64, f64)> {
+    fn sample_series_for_records(&self, field_name: String, num_of_points: u16) -> Vec<(i64, f64)> {
         println!("sample_series_for_records oh yaya!!!");
 
         // if there are no records, return empty vec
@@ -92,7 +92,7 @@ impl FitDataRecordVecExt for Vec<FitDataRecord> {
             .map(|(bucket, records)| {
                 let timestamp = min + (bucket as i64 * interval) as i64;
                 let value = self.aggregate_field_values(records, &field_name);
-                (timestamp as u64, value)
+                (timestamp, value)
             })
             .collect()
     }
@@ -328,7 +328,7 @@ impl FitParseResult {
         zone_times
     }
 
-    fn sample_series_for_records(&self, field_name: String, num_of_points: u16) -> Vec<(u64, f64)> {
+    fn sample_series_for_records(&self, field_name: String, num_of_points: u16) -> Vec<(i64, f64)> {
         println!("Sampling series for field: {}", field_name);
         self.0.sample_series_for_records(field_name, num_of_points)
     }
