@@ -39,12 +39,8 @@ pub trait FitDataRecordVecExt {
 
 impl FitDataRecordVecExt for Vec<FitDataRecord> {
     fn sample_series_for_records(&self, field_name: String, num_of_points: u16) -> Vec<(i64, f64)> {
-        println!("sample_series_for_records oh yaya!!!");
-
         // if there are no records, return empty vec
         if self.is_empty() {
-            println!("sample_series_for_records: empty records");
-
             return vec![];
         }
 
@@ -54,15 +50,11 @@ impl FitDataRecordVecExt for Vec<FitDataRecord> {
             .find(|r| r.kind() == MesgNum::Record && r.timestamp().is_some())
             .and_then(|r| r.timestamp());
 
-        println!("min_timestamp: {:?}", min_timestamp);
-
         let max_timestamp = self
             .iter()
             .rev()
             .find(|r| r.kind() == MesgNum::Record && r.timestamp().is_some())
             .and_then(|r| r.timestamp());
-
-        println!("max_timestamp: {:?}", max_timestamp);
 
         // if both exists and min is less than max, we proceed
         // otherwise return empty vec
@@ -329,7 +321,6 @@ impl FitParseResult {
     }
 
     fn sample_series_for_records(&self, field_name: String, num_of_points: u16) -> Vec<(i64, f64)> {
-        println!("Sampling series for field: {}", field_name);
         self.0.sample_series_for_records(field_name, num_of_points)
     }
 
