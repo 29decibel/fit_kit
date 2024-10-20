@@ -22,6 +22,17 @@ fit_data_records = ::FitKit.parse_fit_file(test_fit_file)
 # { record: [{...}, {...}], session: [{...}], lap: [..], activity: [...] }
 ```
 
+## Features
+There are couple of more built-in features can simplify the consuming of the data significantly:
+
+- `records_hash`   - All records in a ruby hash format
+- `avg_for`        - Average of a given field
+- `elevation_gain` - Elevation gain. Calculate the overall elevation gain. Also allow to pass in a field.
+- `calculate_partition_indices` - Calculate the partition indices for a given field
+- `partition_stats_for_fields` - Calculate the partition stats for a given field. Useful for calculating splits data.
+- `sample_series_for_records` - Sample series for a given field, useful for plotting
+- `zone_time_for` - Heart Rate Zones data
+
 ## Performance
 Here is the performance parsing __4090__ fit files on my M1 Mac Mini (16G, 8 Cores) took 6 seconds (in parallel):
 
