@@ -33,12 +33,20 @@ impl FitDataRecordExt for FitDataRecord {
 
 /// extension methods for vec of FitDataRecord
 pub trait FitDataRecordVecExt {
-    fn sample_series_for_records(&self, field_name: String, num_of_points: u16) -> Vec<(i64, f64)>;
-    fn aggregate_field_values(&self, records: Vec<&FitDataRecord>, field: &str) -> f64;
+    fn sample_series_for_records(
+        &self,
+        field_name: String,
+        num_of_points: u16,
+    ) -> Vec<(i64, f64, String)>;
+    fn aggregate_field_values(&self, records: Vec<&FitDataRecord>, field: &str) -> (f64, String);
 }
 
 impl FitDataRecordVecExt for Vec<FitDataRecord> {
-    fn sample_series_for_records(&self, field_name: String, num_of_points: u16) -> Vec<(i64, f64)> {
+    fn sample_series_for_records(
+        &self,
+        field_name: String,
+        num_of_points: u16,
+    ) -> Vec<(i64, f64, String)> {
         // if there are no records, return empty vec
         if self.is_empty() {
             return vec![];
@@ -83,13 +91,13 @@ impl FitDataRecordVecExt for Vec<FitDataRecord> {
             .into_iter()
             .map(|(bucket, records)| {
                 let timestamp = min + (bucket as i64 * interval) as i64;
-                let value = self.aggregate_field_values(records, &field_name);
-                (timestamp, value)
+                let (value, units) = self.aggregate_field_values(records, &field_name);
+                (timestamp, value, units)
             })
             .collect()
     }
 
-    fn aggregate_field_values(&self, records: Vec<&FitDataRecord>, field: &str) -> f64 {
+    fn aggregate_field_values(&self, records: Vec<&FitDataRecord>, field: &str) -> (f64, String) {
         // Use the new field method
         let values: Vec<f64> = records
             .iter()
@@ -100,11 +108,16 @@ impl FitDataRecordVecExt for Vec<FitDataRecord> {
             })
             .collect();
 
+        let units = records
+            .iter()
+            .find_map(|record| record.field_value(field).map(|(_, u)| u))
+            .unwrap_or_else(|| String::from(""));
+
         // Calculate average (or use another aggregation method)
         if values.is_empty() {
-            0.0
+            (0.0, String::from(""))
         } else {
-            values.iter().sum::<f64>() / values.len() as f64
+            (values.iter().sum::<f64>() / values.len() as f64, units)
         }
     }
 }
@@ -320,7 +333,11 @@ impl FitParseResult {
         zone_times
     }
 
-    fn sample_series_for_records(&self, field_name: String, num_of_points: u16) -> Vec<(i64, f64)> {
+    fn sample_series_for_records(
+        &self,
+        field_name: String,
+        num_of_points: u16,
+    ) -> Vec<(i64, f64, String)> {
         self.0.sample_series_for_records(field_name, num_of_points)
     }
 
