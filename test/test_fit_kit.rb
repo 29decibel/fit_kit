@@ -18,35 +18,31 @@ class TestFitKit < Minitest::Test
 
   def test_parse_fit_file
     assert_equal(fit_parse_result.records_hash.keys, [
-      :file_id,
-      :developer_data_id,
-      :device_info,
-      :activity,
-      :field_description,
-      :event,
-      :record,
-      :lap,
-      :session
+      :activity, :developer_data_id, :device_info, :event, :field_description, :file_id, :lap, :record, :session
     ], "Fit file keys should match")
     # check the record type
-    assert_equal(876, fit_parse_result.records_hash[:record].size, "Record kind items should match")
+    assert_equal(2355, fit_parse_result.records_hash[:record].size, "Record kind items should match")
   end
 
   def test_parse_fit_file_hash
     # pick some of them
-    fields_hash = fit_parse_result.records_hash[:record][123]
-    assert_equal({position_lat: {units: "semicircles", value: 402434146},
-     position_long: {units: "semicircles", value: -1404677685},
-     heart_rate: {units: "bpm", value: 132},
-     cadence: {units: "rpm", value: 89},
-     distance: {units: "m", value: 4534.0},
-     power: {units: "watts", value: 262},
-     accumulated_power: {units: "watts", value: 337824},
-     activity_type: {units: "", value: "running"},
-     enhanced_speed: {units: "m/s", value: 2.969},
-     enhanced_altitude: {units: "m", value: 133.0},
-     step_length: {units: "mm", value: 1000.0},
-     timestamp: {units: "s", value: 1624025048}}, fields_hash)
+    record = fit_parse_result.records_hash[:record].find { |r| r[:timestamp][:value] == 1624025048 }
+
+    assert_equal(
+      {position_lat: {units: "semicircles", value: 402434146},
+       position_long: {units: "semicircles", value: -1404677685},
+       heart_rate: {units: "bpm", value: 132},
+       cadence: {units: "rpm", value: 89},
+       distance: {units: "m", value: 4534.0},
+       power: {units: "watts", value: 262},
+       accumulated_power: {units: "watts", value: 337824},
+       activity_type: {units: "", value: "running"},
+       enhanced_speed: {units: "m/s", value: 2.969},
+       enhanced_altitude: {units: "m", value: 133.0},
+       step_length: {units: "mm", value: 1000.0},
+       timestamp: {units: "s", value: 1624025048}},
+      record
+    )
   end
 
   def test_avg_for_method

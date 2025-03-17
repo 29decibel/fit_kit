@@ -1,7 +1,9 @@
 use fitparser::{self, profile::MesgNum, FitDataField, FitDataRecord, Value};
-use itertools::Itertools;
 use magnus::{function, method, prelude::*, Error, IntoValue, RArray, RHash, Ruby, Symbol};
-use std::{collections::BTreeMap, fs::File};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs::File,
+};
 
 /// Extesnion methods for FitDataRecord
 pub trait FitDataRecordExt {
@@ -157,14 +159,23 @@ impl FitParseResult {
      * With keys are the record types
      */
     fn records_hash(&self) -> RHash {
+        let mut records_by_kind_vec: Vec<(String, Vec<&FitDataRecord>)> = {
+            let mut map: HashMap<String, Vec<&FitDataRecord>> = HashMap::new();
+
+            for record in self.0.iter() {
+                let kind = record.kind().to_string();
+                map.entry(kind).or_insert_with(Vec::new).push(record);
+            }
+
+            map.into_iter().collect()
+        };
+
+        // Sort the vector by the first element (kind string)
+        records_by_kind_vec.sort_by(|a, b| a.0.cmp(&b.0));
+
         // now let's group by the record by kind
         let result_hash = RHash::new();
-        for (kind, kind_records) in self
-            .0
-            .iter()
-            .chunk_by(|record| record.kind().to_string())
-            .into_iter()
-        {
+        for (kind, kind_records) in records_by_kind_vec {
             // turn records into rarray
             let array = RArray::new();
             for record in kind_records {
@@ -427,33 +438,34 @@ impl FitParseResult {
 }
 
 // recursive method to turn Fit value into magnus::Value
-fn value_to_rb_value(value: &Value) -> magnus::Value {
+fn value_to_rb_value(value: &Value) -> Option<magnus::Value> {
     match value {
-        Value::Timestamp(t) => t.timestamp().into_value(),
-        Value::SInt8(i) => i.into_value(),
-        Value::UInt8(u) => u.into_value(),
-        Value::SInt16(i) => i.into_value(),
-        Value::UInt16(u) => u.into_value(),
-        Value::SInt32(i) => i.into_value(),
-        Value::UInt32(u) => u.into_value(),
-        Value::String(s) => s.clone().into_value(),
-        Value::Float32(f) => f.into_value(),
-        Value::Float64(f) => f.into_value(),
-        Value::UInt8z(u) => u.into_value(),
-        Value::UInt16z(u) => u.into_value(),
-        Value::UInt32z(u) => u.into_value(),
-        Value::Byte(b) => b.into_value(),
-        Value::SInt64(i) => i.into_value(),
-        Value::UInt64(u) => u.into_value(),
-        Value::UInt64z(u) => u.into_value(),
-        Value::Enum(e) => e.into_value(),
+        Value::Timestamp(t) => Some(t.timestamp().into_value()),
+        Value::SInt8(i) => Some(i.into_value()),
+        Value::UInt8(u) => Some(u.into_value()),
+        Value::SInt16(i) => Some(i.into_value()),
+        Value::UInt16(u) => Some(u.into_value()),
+        Value::SInt32(i) => Some(i.into_value()),
+        Value::UInt32(u) => Some(u.into_value()),
+        Value::String(s) => Some(s.clone().into_value()),
+        Value::Float32(f) => Some(f.into_value()),
+        Value::Float64(f) => Some(f.into_value()),
+        Value::UInt8z(u) => Some(u.into_value()),
+        Value::UInt16z(u) => Some(u.into_value()),
+        Value::UInt32z(u) => Some(u.into_value()),
+        Value::Byte(b) => Some(b.into_value()),
+        Value::SInt64(i) => Some(i.into_value()),
+        Value::UInt64(u) => Some(u.into_value()),
+        Value::UInt64z(u) => Some(u.into_value()),
+        Value::Enum(e) => Some(e.into_value()),
         Value::Array(arr) => {
             let rb_array = RArray::new();
             for value in arr {
                 rb_array.push(value_to_rb_value(value)).unwrap();
             }
-            rb_array.into_value()
+            Some(rb_array.into_value())
         }
+        Value::Invalid => None,
     }
 }
 
@@ -461,13 +473,17 @@ fn value_to_rb_value(value: &Value) -> magnus::Value {
 fn get_fields_hash(record: &FitDataRecord) -> RHash {
     let hash = RHash::new();
     for field in record.fields() {
-        let value = value_to_rb_value(field.value());
-        let pair = RHash::new();
-        pair.aset(Symbol::new("units"), field.units()).unwrap();
-        pair.aset(Symbol::new("value"), value).unwrap();
-        // here we add the stuff to the hash
-        let field_name_symbol = Symbol::new(field.name());
-        hash.aset(field_name_symbol, pair).unwrap();
+        match value_to_rb_value(field.value()) {
+            Some(value) => {
+                let pair = RHash::new();
+                pair.aset(Symbol::new("units"), field.units()).unwrap();
+                pair.aset(Symbol::new("value"), value).unwrap();
+                // here we add the stuff to the hash
+                let field_name_symbol = Symbol::new(field.name());
+                hash.aset(field_name_symbol, pair).unwrap();
+            }
+            None => {}
+        }
     }
 
     hash
