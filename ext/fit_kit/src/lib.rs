@@ -159,7 +159,7 @@ impl FitParseResult {
      * With keys are the record types
      */
     fn records_hash(&self) -> RHash {
-        let records_by_kind_vec: Vec<(String, Vec<&FitDataRecord>)> = {
+        let mut records_by_kind_vec: Vec<(String, Vec<&FitDataRecord>)> = {
             let mut map: HashMap<String, Vec<&FitDataRecord>> = HashMap::new();
 
             for record in self.0.iter() {
@@ -169,6 +169,9 @@ impl FitParseResult {
 
             map.into_iter().collect()
         };
+
+        // Sort the vector by the first element (kind string)
+        records_by_kind_vec.sort_by(|a, b| a.0.cmp(&b.0));
 
         // now let's group by the record by kind
         let result_hash = RHash::new();
