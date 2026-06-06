@@ -1,4 +1,15 @@
 module FitKit
   VERSION: String
-  # See the writing guide of rbs: https://github.com/ruby/rbs#guides
+
+  def self.parse_fit_file: (String file_path) -> FitParseResult
+end
+
+class FitParseResult
+  def records_hash: () -> Hash[Symbol, Array[Hash[Symbol, Hash[Symbol, untyped]]]]
+  def avg_for: (String | Symbol field_name) -> [Float, String]
+  def elevation_gain: (String | Symbol field_name) -> [Float, String]
+  def calculate_partition_indices: (Float partition_distance, String | Symbol field_name) -> Array[Integer]
+  def partition_stats_for_fields: (String | Symbol by_field, Float partition_distance, Array[String | Symbol] fields) -> Array[Array[[String | Symbol, [Float, String]]]]
+  def sample_series_for_records: (String | Symbol field_name, Integer num_of_points) -> Array[[Integer, Float, String]]
+  def zone_time_for: (Array[[Float, Float]] zones, String | Symbol field_name) -> Array[[[Float, Float], Float]]
 end

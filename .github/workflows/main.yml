@@ -18,12 +18,15 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Ruby & Rust
-      uses: oxidize-rb/actions/setup-ruby-and-rust@v1
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@v1
       with:
         ruby-version: ${{ matrix.ruby }}
         bundler-cache: true
-        cargo-cache: true
         rubygems: '3.5.16'
+    - name: Set up Zig
+      uses: mlugg/setup-zig@v2
+      with:
+        version: 0.14.1
     - name: Run the default task
       run: bundle exec rake

@@ -2,7 +2,7 @@
 
 > Not production ready yet.
 
-`fit_kit` is a small ruby gem wraps Rust's crate [fitparse-rs](https://github.com/stadelmanma/fitparse-rs) to provide effecient and fast Garmin fit files parsing.
+`fit_kit` is a small Ruby gem with a Zig native extension for efficient Garmin FIT file parsing.
 
 ## Installation
 
@@ -41,6 +41,14 @@ Here is the performance parsing __4090__ fit files on my M1 Mac Mini (16G, 8 Cor
 Parsing 4090 fit files...
        user     system      total        real
   0.129862   0.102642  45.192900 (  6.121117)
+```
+
+## Development
+
+Building the native extension requires Zig. The default task compiles the extension, runs the tests, and runs Standard Ruby:
+
+```sh
+bundle exec rake
 ```
 
 Code to parse a given folder (contains __4090__ fit files) in parallel:

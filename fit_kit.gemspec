@@ -9,7 +9,7 @@ Gem::Specification.new do |spec|
   spec.email = ["m@idots.me"]
 
   spec.summary = "Ruby gem to parse Garmin fit file."
-  spec.description = "Garmin fit file parser wrapping Rust crate fitparse_rs."
+  spec.description = "Garmin FIT file parser backed by a Zig native extension."
   spec.homepage = "https://github.com/29decibel/fit_kit"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.0.0"
@@ -33,7 +33,7 @@ Gem::Specification.new do |spec|
   spec.bindir = "exe"
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
-  spec.extensions = ["ext/fit_kit/Cargo.toml"]
+  spec.extensions = ["ext/fit_kit/extconf.rb"]
 
   # Uncomment to register a new dependency of your gem
   # spec.add_dependency "example-gem", "~> 1.0"

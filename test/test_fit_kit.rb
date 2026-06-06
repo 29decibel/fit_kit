@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "test_helper"
-require "benchmark"
 
 class TestFitKit < Minitest::Test
   def test_that_it_has_a_version_number
@@ -95,7 +94,6 @@ class TestFitKit < Minitest::Test
       [153, 165],
       [166, 250]
     ], "heart_rate")
-    zone_times.map { |zone| puts "Zone: #{zone[0][0]} - #{zone[0][1]}: #{zone[1]} (#{zone[1] / 60} mins)" }
     assert_equal(5, zone_times.size)
     actual = [[[0.0, 124.0], 2099.0], [[125.0, 138.0], 1431.0], [[139.0, 152.0], 384.0], [[153.0, 165.0], 0.0], [[166.0, 250.0], 0.0]]
     assert_equal(actual, zone_times)
@@ -133,5 +131,38 @@ class TestFitKit < Minitest::Test
       [1729104835, 80.88328912466844, "rpm"],
       [1729105226, 0.0, ""]]
     assert_equal(expected, points)
+  end
+
+  def test_empty_result_helpers
+    result = FitParseResult.allocate
+    result.instance_variable_set(:@records_hash, {})
+    result.instance_variable_set(:@records, [])
+
+    assert_equal([0.0, ""], result.avg_for(:heart_rate))
+    assert_equal([0.0, ""], result.elevation_gain(:enhanced_altitude))
+    assert_equal([], result.calculate_partition_indices(1600, :distance))
+    assert_equal([], result.partition_stats_for_fields(:distance, 1600, [:heart_rate]))
+    assert_equal([], result.sample_series_for_records(:heart_rate, 10))
+    assert_equal([], result.zone_time_for([], :heart_rate))
+  end
+
+  def test_sample_series_rejects_invalid_point_counts
+    result = fit_parse_result("apple-watch-example.fit")
+
+    assert_equal([], result.sample_series_for_records(:heart_rate, 0))
+  end
+
+  def test_non_numeric_fields_do_not_average
+    result = FitParseResult.allocate
+    result.instance_variable_set(:@records_hash, {record: [{activity_type: {units: "", value: "running"}}]})
+    result.instance_variable_set(:@records, [{kind: :record, fields: {activity_type: {units: "", value: "running"}}}])
+
+    assert_equal([0.0, ""], result.avg_for(:activity_type))
+  end
+
+  def test_parse_missing_file_raises
+    assert_raises(RuntimeError) do
+      FitKit.parse_fit_file(File.join(Dir.pwd, "test/fixtures/missing.fit"))
+    end
   end
 end

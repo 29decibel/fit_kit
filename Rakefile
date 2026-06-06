@@ -7,13 +7,13 @@ Minitest::TestTask.create
 
 require "standard/rake"
 
-require "rb_sys/extensiontask"
+require "rake/extensiontask"
 
 task build: :compile
 
 GEMSPEC = Gem::Specification.load("fit_kit.gemspec")
 
-RbSys::ExtensionTask.new("fit_kit", GEMSPEC) do |ext|
+Rake::ExtensionTask.new("fit_kit", GEMSPEC) do |ext|
   ext.lib_dir = "lib/fit_kit"
 end
 
