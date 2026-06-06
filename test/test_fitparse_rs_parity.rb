@@ -46,6 +46,16 @@ class TestFitparseRsParity < Minitest::Test
     assert_equal({units: "doughnuts", value: 1}, field)
   end
 
+  def test_developer_data_file_id_matches_fitparse_rs
+    result = FitKit.parse_fit_file(fixture_path("DeveloperData.fit"))
+    fields = result.instance_variable_get(:@records).first.fetch(:fields)
+
+    assert_equal({units: "", value: "activity"}, fields.fetch(:type))
+    assert_equal({units: "", value: "dynastream"}, fields.fetch(:manufacturer))
+    assert_equal({units: "", value: 9001}, fields.fetch(:garmin_product))
+    refute_includes fields, :product
+  end
+
   def test_hrv_time_array
     result = FitKit.parse_fit_file(fixture_path("hrv-activity.fit"))
     hrv_record = result.instance_variable_get(:@records).find { |record| record.fetch(:kind) == :hrv }

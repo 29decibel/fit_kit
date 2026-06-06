@@ -320,11 +320,13 @@ const Parser = struct {
 
         const record = c.rb_hash_new();
         var developer_description_builder = DeveloperDescriptionBuilder{};
+        var file_id_manufacturer: ?u64 = null;
         for (definition.fields.items) |field| {
             const bytes = try self.readBytes(field.size);
             const scalar = parseScalar(field.base_type, bytes, endian);
             if (definition.global_message_number == 206) developer_description_builder.capture(field.number, scalar);
-            try self.addField(record, definition.global_message_number, field, bytes, endian);
+            if (definition.global_message_number == 0 and field.number == 1) file_id_manufacturer = scalar.toU64();
+            try self.addField(record, definition.global_message_number, field, bytes, endian, file_id_manufacturer);
         }
         if (definition.global_message_number == 206) {
             if (developer_description_builder.key()) |key| {
@@ -359,8 +361,14 @@ const Parser = struct {
         field: FieldDef,
         bytes: []const u8,
         endian: std.builtin.Endian,
+        file_id_manufacturer: ?u64,
     ) !void {
         const scalar = parseScalar(field.base_type, bytes, endian);
+        if (global_message_number == 0) {
+            self.addFileIdField(record, field, scalar, bytes, endian, file_id_manufacturer);
+            return;
+        }
+
         if (global_message_number == 20) {
             try self.addRecordField(record, field, scalar, bytes, endian);
             return;
@@ -372,6 +380,41 @@ const Parser = struct {
             var name_buffer: [32]u8 = undefined;
             const name = std.fmt.bufPrintZ(&name_buffer, "unknown_{}", .{field.number}) catch return;
             addPair(record, name, rbRawValue(field.base_type, bytes, endian), "");
+        }
+    }
+
+    fn addFileIdField(
+        self: *Parser,
+        record: VALUE,
+        field: FieldDef,
+        scalar: Scalar,
+        bytes: []const u8,
+        endian: std.builtin.Endian,
+        file_id_manufacturer: ?u64,
+    ) void {
+        _ = self;
+        switch (field.number) {
+            0 => {
+                const value = scalar.toU64() orelse return;
+                addPair(record, "type", rbString(fileTypeName(@intCast(value))), "");
+            },
+            1 => {
+                const value = scalar.toU64() orelse return;
+                addPair(record, "manufacturer", rbString(manufacturerName(value)), "");
+            },
+            2 => {
+                const name = if (isGarminProductManufacturer(file_id_manufacturer)) "garmin_product" else "product";
+                addConvertedBytes(record, .{ .name = name }, field.base_type, bytes, endian);
+            },
+            else => {
+                if (fieldInfo(0, field.number)) |info| {
+                    addConvertedBytes(record, info, field.base_type, bytes, endian);
+                } else {
+                    var name_buffer: [32]u8 = undefined;
+                    const name = std.fmt.bufPrintZ(&name_buffer, "unknown_{}", .{field.number}) catch return;
+                    addPair(record, name, rbRawValue(field.base_type, bytes, endian), "");
+                }
+            },
         }
     }
 
@@ -795,6 +838,61 @@ fn activityTypeName(value: u8) []const u8 {
         8 => "sedentary",
         254 => "all",
         else => "unknown",
+    };
+}
+
+fn fileTypeName(value: u8) []const u8 {
+    return switch (value) {
+        1 => "device",
+        2 => "settings",
+        3 => "sport",
+        4 => "activity",
+        5 => "workout",
+        6 => "course",
+        7 => "schedules",
+        9 => "weight",
+        10 => "totals",
+        11 => "goals",
+        14 => "blood_pressure",
+        15 => "monitoring_a",
+        20 => "activity_summary",
+        28 => "monitoring_daily",
+        32 => "monitoring_b",
+        34 => "segment",
+        35 => "segment_list",
+        40 => "exd_configuration",
+        247 => "mfg_range_min",
+        254 => "mfg_range_max",
+        else => "unknown",
+    };
+}
+
+fn manufacturerName(value: u64) []const u8 {
+    return switch (value) {
+        1 => "garmin",
+        2 => "garmin_fr405_antfs",
+        3 => "zephyr",
+        4 => "dayton",
+        5 => "idt",
+        6 => "srm",
+        7 => "quarq",
+        8 => "ibike",
+        9 => "saris",
+        10 => "spark_hk",
+        11 => "tanita",
+        12 => "echowell",
+        13 => "dynastream_oem",
+        15 => "dynastream",
+        89 => "tacx",
+        263 => "favero_electronics",
+        else => "unknown",
+    };
+}
+
+fn isGarminProductManufacturer(value: ?u64) bool {
+    return switch (value orelse return false) {
+        1, 13, 15, 89 => true,
+        else => false,
     };
 }
 
