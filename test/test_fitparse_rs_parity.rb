@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "tempfile"
 
 class TestFitparseRsParity < Minitest::Test
   FIXTURES = {
@@ -53,9 +54,42 @@ class TestFitparseRsParity < Minitest::Test
     assert_equal({units: "s", value: [0.467, 0.464, nil, nil, nil]}, field)
   end
 
+  def test_invalid_header_crc_raises
+    error = assert_raises(RuntimeError) do
+      parse_modified_fixture("MonitoringFile.fit") do |data|
+        data.setbyte(12, 0xff)
+        data.setbyte(13, 0xff)
+      end
+    end
+
+    assert_match(/InvalidFitCrc/, error.message)
+  end
+
+  def test_invalid_data_crc_raises
+    error = assert_raises(RuntimeError) do
+      parse_modified_fixture("MonitoringFile.fit") do |data|
+        data.setbyte(data.bytesize - 2, 0xff)
+        data.setbyte(data.bytesize - 1, 0xff)
+      end
+    end
+
+    assert_match(/InvalidFitCrc/, error.message)
+  end
+
   private
 
   def fixture_path(fixture)
     File.join(Dir.pwd, "test/fixtures/fitparse_rs", fixture)
+  end
+
+  def parse_modified_fixture(fixture)
+    Tempfile.create(["fit_kit_parity", ".fit"], binmode: true) do |file|
+      data = File.binread(fixture_path(fixture))
+      yield data
+      file.write(data)
+      file.close
+
+      FitKit.parse_fit_file(file.path)
+    end
   end
 end

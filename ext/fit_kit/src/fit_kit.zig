@@ -7,6 +7,10 @@ const c = @cImport({
 const VALUE = c.VALUE;
 const Qnil: VALUE = c.RUBY_Qnil;
 const FIT_EPOCH_OFFSET: i64 = 631065600;
+const CRC_TABLE = [_]u16{
+    0x0000, 0xcc01, 0xd801, 0x1400, 0xf001, 0x3c00, 0x2800, 0xe401,
+    0xa001, 0x6c00, 0x7800, 0xb401, 0x5000, 0x9c01, 0x8801, 0x4400,
+};
 
 var fit_parse_result_class: VALUE = Qnil;
 
@@ -159,6 +163,8 @@ const Parser = struct {
     data: []const u8,
     offset: usize = 0,
     end: usize = 0,
+    data_start: usize = 0,
+    crc: u16 = 0,
     definitions: [16]?Definition = [_]?Definition{null} ** 16,
     groups: [known_kinds.len]VALUE = [_]VALUE{Qnil} ** known_kinds.len,
     all_records: VALUE = Qnil,
@@ -199,7 +205,7 @@ const Parser = struct {
                 }
             }
 
-            if (self.offset + 2 > self.data.len) return error.InvalidFitData;
+            try self.validateDataCrc();
             self.offset += 2;
             if (self.offset < self.data.len) {
                 self.resetFileState();
@@ -223,8 +229,30 @@ const Parser = struct {
 
         const data_size = std.mem.readInt(u32, self.data[header_start + 4 ..][0..4], .little);
         self.offset = header_start + header_size;
+        self.data_start = self.offset;
         self.end = self.offset + @as(usize, data_size);
         if (self.end + 2 > self.data.len) return error.InvalidFitData;
+
+        self.crc = 0;
+        if (header_size > 12) {
+            const header_crc = std.mem.readInt(u16, self.data[header_start + 12 ..][0..2], .little);
+            if (header_crc > 0) {
+                const calculated = calculateCrc(self.data[header_start .. header_start + header_size - 2]);
+                if (calculated != header_crc) return error.InvalidFitCrc;
+                return;
+            }
+        }
+
+        self.crc = updateCrc(0, self.data[header_start .. header_start + header_size]);
+    }
+
+    fn validateDataCrc(self: *Parser) !void {
+        if (self.offset != self.end) return error.InvalidFitData;
+        if (self.offset + 2 > self.data.len) return error.InvalidFitData;
+
+        const expected = std.mem.readInt(u16, self.data[self.offset..][0..2], .little);
+        const calculated = updateCrc(self.crc, self.data[self.data_start..self.end]);
+        if (calculated != expected) return error.InvalidFitCrc;
     }
 
     fn resetFileState(self: *Parser) void {
@@ -622,6 +650,28 @@ fn baseTypeSize(base_type: BaseType) usize {
 fn trimString(bytes: []const u8) []const u8 {
     const end = std.mem.indexOfScalar(u8, bytes, 0) orelse bytes.len;
     return bytes[0..end];
+}
+
+fn calculateCrc(data: []const u8) u16 {
+    return updateCrc(0, data);
+}
+
+fn updateCrc(initial: u16, data: []const u8) u16 {
+    var crc = initial;
+    for (data) |byte| crc = getCrc(crc, byte);
+    return crc;
+}
+
+fn getCrc(initial: u16, byte: u8) u16 {
+    var tmp = CRC_TABLE[initial & 0x0f];
+    var crc = (initial >> 4) & 0x0fff;
+    crc = crc ^ tmp ^ CRC_TABLE[byte & 0x0f];
+
+    tmp = CRC_TABLE[crc & 0x0f];
+    crc = (crc >> 4) & 0x0fff;
+    crc = crc ^ tmp ^ CRC_TABLE[(byte >> 4) & 0x0f];
+
+    return crc;
 }
 
 fn developerDescriptionKey(developer_data_index: u8, field_definition_number: u8) u16 {
