@@ -36,11 +36,22 @@ const FieldDef = struct {
     base_type: BaseType,
 };
 
+const DeveloperFieldDef = struct {
+    field_number: u8,
+    size: u8,
+    developer_data_index: u8,
+};
+
 const Definition = struct {
     global_message_number: u16,
     little_endian: bool,
     fields: std.ArrayList(FieldDef),
-    developer_field_bytes: usize = 0,
+    developer_fields: std.ArrayList(DeveloperFieldDef),
+
+    fn deinit(self: *Definition) void {
+        self.fields.deinit();
+        self.developer_fields.deinit();
+    }
 };
 
 const Scalar = union(enum) {
@@ -76,6 +87,71 @@ const FieldInfo = struct {
     offset: f64 = 0.0,
     date_time: bool = false,
     activity_type: bool = false,
+    fit_base_type: bool = false,
+};
+
+const DeveloperDescription = struct {
+    base_type: BaseType,
+    name: []const u8,
+    units: []const u8 = "",
+    scale: f64 = 1.0,
+    offset: f64 = 0.0,
+};
+
+const DeveloperDescriptionBuilder = struct {
+    developer_data_index: ?u8 = null,
+    field_definition_number: ?u8 = null,
+    base_type: ?BaseType = null,
+    name: ?[]const u8 = null,
+    units: []const u8 = "",
+    scale: f64 = 1.0,
+    offset: f64 = 0.0,
+
+    fn capture(self: *DeveloperDescriptionBuilder, field_number: u8, scalar: Scalar) void {
+        switch (field_number) {
+            0 => {
+                if (scalar.toU64()) |value| self.developer_data_index = @intCast(value);
+            },
+            1 => {
+                if (scalar.toU64()) |value| self.field_definition_number = @intCast(value);
+            },
+            2 => {
+                if (scalar.toU64()) |value| self.base_type = baseTypeFromFitBaseTypeId(@intCast(value));
+            },
+            3 => switch (scalar) {
+                .string => |value| self.name = value,
+                else => {},
+            },
+            6 => {
+                if (scalar.toF64()) |value| self.scale = value;
+            },
+            7 => {
+                if (scalar.toF64()) |value| self.offset = value;
+            },
+            8 => switch (scalar) {
+                .string => |value| self.units = value,
+                else => {},
+            },
+            else => {},
+        }
+    }
+
+    fn key(self: DeveloperDescriptionBuilder) ?u16 {
+        const developer_data_index = self.developer_data_index orelse return null;
+        const field_definition_number = self.field_definition_number orelse return null;
+        return developerDescriptionKey(developer_data_index, field_definition_number);
+    }
+
+    fn description(self: DeveloperDescriptionBuilder) ?DeveloperDescription {
+        const base_type = self.base_type orelse return null;
+        return .{
+            .base_type = base_type,
+            .name = self.name orelse "unknown_developer_field",
+            .units = self.units,
+            .scale = self.scale,
+            .offset = self.offset,
+        };
+    }
 };
 
 const Parser = struct {
@@ -88,45 +164,46 @@ const Parser = struct {
     all_records: VALUE = Qnil,
     base_timestamp: i64 = 0,
     accumulators: std.AutoHashMap(u32, u64),
+    developer_descriptions: std.AutoHashMap(u16, DeveloperDescription),
 
     fn init(allocator: std.mem.Allocator, data: []const u8) !Parser {
-        if (data.len < 14) return error.InvalidFitHeader;
-        const header_size = data[0];
-        if (header_size != 12 and header_size != 14) return error.InvalidFitHeader;
-        if (data.len < header_size + 2) return error.InvalidFitHeader;
-        if (!std.mem.eql(u8, data[8..12], ".FIT")) return error.InvalidFitHeader;
-
-        const data_size = std.mem.readInt(u32, data[4..8], .little);
-        const data_start: usize = header_size;
-        const data_end = data_start + @as(usize, data_size);
-        if (data_end + 2 > data.len) return error.InvalidFitData;
-
-        return Parser{
+        var parser = Parser{
             .allocator = allocator,
             .data = data,
-            .offset = data_start,
-            .end = data_end,
             .all_records = c.rb_ary_new(),
             .accumulators = std.AutoHashMap(u32, u64).init(allocator),
+            .developer_descriptions = std.AutoHashMap(u16, DeveloperDescription).init(allocator),
         };
+        try parser.readHeader();
+        return parser;
     }
 
     fn deinit(self: *Parser) void {
         for (&self.definitions) |*definition| {
-            if (definition.*) |*value| value.fields.deinit();
+            if (definition.*) |*value| value.deinit();
         }
         self.accumulators.deinit();
+        self.developer_descriptions.deinit();
     }
 
     fn parse(self: *Parser) !VALUE {
-        while (self.offset < self.end) {
-            const header = try self.readU8();
-            if ((header & 0x80) != 0) {
-                try self.parseCompressedTimestampMessage(header);
-            } else if ((header & 0x40) != 0) {
-                try self.parseDefinitionMessage(header);
-            } else {
-                try self.parseDataMessage(header & 0x0f, null);
+        while (self.offset < self.data.len) {
+            while (self.offset < self.end) {
+                const header = try self.readU8();
+                if ((header & 0x80) != 0) {
+                    try self.parseCompressedTimestampMessage(header);
+                } else if ((header & 0x40) != 0) {
+                    try self.parseDefinitionMessage(header);
+                } else {
+                    try self.parseDataMessage(header & 0x0f, null);
+                }
+            }
+
+            if (self.offset + 2 > self.data.len) return error.InvalidFitData;
+            self.offset += 2;
+            if (self.offset < self.data.len) {
+                self.resetFileState();
+                try self.readHeader();
             }
         }
 
@@ -134,6 +211,30 @@ const Parser = struct {
         _ = c.rb_iv_set(result, "@records_hash", self.buildRecordsHash());
         _ = c.rb_iv_set(result, "@records", self.all_records);
         return result;
+    }
+
+    fn readHeader(self: *Parser) !void {
+        if (self.offset + 12 > self.data.len) return error.InvalidFitHeader;
+        const header_start = self.offset;
+        const header_size = self.data[header_start];
+        if (header_size != 12 and header_size != 14) return error.InvalidFitHeader;
+        if (header_start + header_size + 2 > self.data.len) return error.InvalidFitHeader;
+        if (!std.mem.eql(u8, self.data[header_start + 8 .. header_start + 12], ".FIT")) return error.InvalidFitHeader;
+
+        const data_size = std.mem.readInt(u32, self.data[header_start + 4 ..][0..4], .little);
+        self.offset = header_start + header_size;
+        self.end = self.offset + @as(usize, data_size);
+        if (self.end + 2 > self.data.len) return error.InvalidFitData;
+    }
+
+    fn resetFileState(self: *Parser) void {
+        for (&self.definitions) |*definition| {
+            if (definition.*) |*value| value.deinit();
+            definition.* = null;
+        }
+        self.base_timestamp = 0;
+        self.accumulators.clearRetainingCapacity();
+        self.developer_descriptions.clearRetainingCapacity();
     }
 
     fn parseCompressedTimestampMessage(self: *Parser, header: u8) !void {
@@ -163,44 +264,56 @@ const Parser = struct {
             fields.appendAssumeCapacity(.{ .number = number, .size = size, .base_type = base_type });
         }
 
-        var developer_field_bytes: usize = 0;
+        var developer_fields = std.ArrayList(DeveloperFieldDef).init(self.allocator);
+        errdefer developer_fields.deinit();
         if ((header & 0x20) != 0) {
             const developer_field_count = try self.readU8();
+            try developer_fields.ensureTotalCapacity(developer_field_count);
             var developer_index: usize = 0;
             while (developer_index < developer_field_count) : (developer_index += 1) {
-                _ = try self.readU8();
+                const field_number = try self.readU8();
                 const size = try self.readU8();
-                _ = try self.readU8();
-                developer_field_bytes += size;
+                const developer_data_index = try self.readU8();
+                developer_fields.appendAssumeCapacity(.{
+                    .field_number = field_number,
+                    .size = size,
+                    .developer_data_index = developer_data_index,
+                });
             }
         }
 
-        if (self.definitions[local_message_number]) |*existing| existing.fields.deinit();
+        if (self.definitions[local_message_number]) |*existing| existing.deinit();
         self.definitions[local_message_number] = .{
             .global_message_number = global_message_number,
             .little_endian = architecture == 0,
             .fields = fields,
-            .developer_field_bytes = developer_field_bytes,
+            .developer_fields = developer_fields,
         };
     }
 
     fn parseDataMessage(self: *Parser, local_message_number: u8, compressed_time_offset: ?u8) !void {
         const definition = self.definitions[local_message_number] orelse return error.MissingDefinitionMessage;
         const endian: std.builtin.Endian = if (definition.little_endian) .little else .big;
-        const kind = kindName(definition.global_message_number) orelse {
-            for (definition.fields.items) |field| self.offset += field.size;
-            self.offset += definition.developer_field_bytes;
-            if (self.offset > self.end) return error.InvalidFitData;
-            return;
-        };
+        const known_kind = kindName(definition.global_message_number);
 
         const record = c.rb_hash_new();
+        var developer_description_builder = DeveloperDescriptionBuilder{};
         for (definition.fields.items) |field| {
             const bytes = try self.readBytes(field.size);
-            try self.addField(record, definition.global_message_number, field, bytes, endian);
+            const scalar = parseScalar(field.base_type, bytes, endian);
+            if (definition.global_message_number == 206) developer_description_builder.capture(field.number, scalar);
+            try self.addField(record, definition.global_message_number, field, scalar);
         }
-        if (definition.developer_field_bytes > 0) {
-            _ = try self.readBytes(definition.developer_field_bytes);
+        if (definition.global_message_number == 206) {
+            if (developer_description_builder.key()) |key| {
+                if (developer_description_builder.description()) |description| {
+                    try self.developer_descriptions.put(key, description);
+                }
+            }
+        }
+        for (definition.developer_fields.items) |developer_field| {
+            const bytes = try self.readBytes(developer_field.size);
+            try self.addDeveloperField(record, developer_field, bytes, endian);
         }
 
         if (compressed_time_offset) |time_offset| {
@@ -208,7 +321,13 @@ const Parser = struct {
             addPair(record, "timestamp", rbInt(timestamp), "s");
         }
 
-        self.addRecord(kind, record);
+        if (known_kind) |kind| {
+            self.addRecord(kind, record);
+        } else {
+            var kind_buffer: [32]u8 = undefined;
+            const kind = try std.fmt.bufPrint(&kind_buffer, "unknown_{}", .{definition.global_message_number});
+            self.addRecord(kind, record);
+        }
     }
 
     fn addField(
@@ -216,10 +335,8 @@ const Parser = struct {
         record: VALUE,
         global_message_number: u16,
         field: FieldDef,
-        bytes: []const u8,
-        endian: std.builtin.Endian,
+        scalar: Scalar,
     ) !void {
-        const scalar = parseScalar(field.base_type, bytes, endian);
         if (global_message_number == 20) {
             try self.addRecordField(record, field, scalar);
             return;
@@ -232,6 +349,25 @@ const Parser = struct {
             const name = std.fmt.bufPrintZ(&name_buffer, "unknown_{}", .{field.number}) catch return;
             addPair(record, name, rbValue(scalar), "");
         }
+    }
+
+    fn addDeveloperField(
+        self: *Parser,
+        record: VALUE,
+        field: DeveloperFieldDef,
+        bytes: []const u8,
+        endian: std.builtin.Endian,
+    ) !void {
+        const description = self.developer_descriptions.get(
+            developerDescriptionKey(field.developer_data_index, field.field_number),
+        ) orelse return error.MissingDeveloperDefinitionMessage;
+        const scalar = parseScalar(description.base_type, bytes, endian);
+        addConvertedField(record, .{
+            .name = description.name,
+            .units = description.units,
+            .scale = description.scale,
+            .offset = description.offset,
+        }, scalar);
     }
 
     fn addRecordField(self: *Parser, record: VALUE, field: FieldDef, scalar: Scalar) !void {
@@ -368,7 +504,34 @@ fn fieldInfo(message_number: u16, field_number: u8) ?FieldInfo {
             253 => .{ .name = "timestamp", .units = "s", .date_time = true },
             else => null,
         },
-        18, 19, 21, 23, 34, 206, 207 => switch (field_number) {
+        18, 19, 21, 23, 34 => switch (field_number) {
+            253 => .{ .name = "timestamp", .units = "s", .date_time = true },
+            else => null,
+        },
+        206 => switch (field_number) {
+            0 => .{ .name = "developer_data_index" },
+            1 => .{ .name = "field_definition_number" },
+            2 => .{ .name = "fit_base_type_id", .fit_base_type = true },
+            3 => .{ .name = "field_name" },
+            4 => .{ .name = "array" },
+            5 => .{ .name = "components" },
+            6 => .{ .name = "scale" },
+            7 => .{ .name = "offset" },
+            8 => .{ .name = "units" },
+            9 => .{ .name = "bits" },
+            10 => .{ .name = "accumulate" },
+            13 => .{ .name = "fit_base_unit_id" },
+            14 => .{ .name = "native_mesg_num" },
+            15 => .{ .name = "native_field_num" },
+            253 => .{ .name = "timestamp", .units = "s", .date_time = true },
+            else => null,
+        },
+        207 => switch (field_number) {
+            0 => .{ .name = "developer_id" },
+            1 => .{ .name = "application_id" },
+            2 => .{ .name = "manufacturer_id" },
+            3 => .{ .name = "developer_data_index" },
+            4 => .{ .name = "application_version" },
             253 => .{ .name = "timestamp", .units = "s", .date_time = true },
             else => null,
         },
@@ -446,10 +609,66 @@ fn trimString(bytes: []const u8) []const u8 {
     return bytes[0..end];
 }
 
+fn developerDescriptionKey(developer_data_index: u8, field_definition_number: u8) u16 {
+    return (@as(u16, developer_data_index) << 8) | field_definition_number;
+}
+
+fn baseTypeFromFitBaseTypeId(value: u8) ?BaseType {
+    return switch (value) {
+        0 => .enum_type,
+        1 => .sint8,
+        2 => .uint8,
+        7 => .string,
+        10 => .uint8z,
+        13 => .byte,
+        131 => .sint16,
+        132 => .uint16,
+        133 => .sint32,
+        134 => .uint32,
+        136 => .float32,
+        137 => .float64,
+        139 => .uint16z,
+        140 => .uint32z,
+        142 => .sint64,
+        143 => .uint64,
+        144 => .uint64z,
+        else => null,
+    };
+}
+
+fn fitBaseTypeName(value: u8) []const u8 {
+    return switch (value) {
+        0 => "enum",
+        1 => "sint8",
+        2 => "uint8",
+        7 => "string",
+        10 => "uint8z",
+        13 => "byte",
+        131 => "sint16",
+        132 => "uint16",
+        133 => "sint32",
+        134 => "uint32",
+        136 => "float32",
+        137 => "float64",
+        139 => "uint16z",
+        140 => "uint32z",
+        142 => "sint64",
+        143 => "uint64",
+        144 => "uint64z",
+        else => "unknown",
+    };
+}
+
 fn addConvertedField(record: VALUE, info: FieldInfo, scalar: Scalar) void {
     if (info.activity_type) {
         const value = scalar.toU64() orelse return;
         addPair(record, info.name, rbString(activityTypeName(@intCast(value))), info.units);
+        return;
+    }
+
+    if (info.fit_base_type) {
+        const value = scalar.toU64() orelse return;
+        addPair(record, info.name, rbString(fitBaseTypeName(@intCast(value))), info.units);
         return;
     }
 
@@ -465,6 +684,11 @@ fn addConvertedField(record: VALUE, info: FieldInfo, scalar: Scalar) void {
         } else {
             addPair(record, info.name, rbValue(scalar), info.units);
         }
+        return;
+    }
+
+    if (info.scale == 1.0 and info.offset == 0.0) {
+        addPair(record, info.name, rbValue(scalar), info.units);
     }
 }
 
