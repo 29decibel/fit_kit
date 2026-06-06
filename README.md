@@ -2,7 +2,7 @@
 
 > Not production ready yet.
 
-`fit_kit` is a small ruby gem wraps Rust's crate [fitparse-rs](https://github.com/stadelmanma/fitparse-rs) to provide effecient and fast Garmin fit files parsing.
+`fit_kit` is a small Ruby gem that parses Garmin FIT files with a local Zig parser.
 
 ## Installation
 

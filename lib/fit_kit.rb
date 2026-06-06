@@ -1,9 +1,8 @@
 # frozen_string_literal: true
 
 require_relative "fit_kit/version"
-require_relative "fit_kit/fit_kit"
+require_relative "fit_kit/parser"
 
 module FitKit
   class Error < StandardError; end
-  # Your code goes here...
 end

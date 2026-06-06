@@ -3,18 +3,10 @@
 require "bundler/gem_tasks"
 require "minitest/test_task"
 
+ENV["RUBOCOP_CACHE_ROOT"] ||= File.expand_path(".rubocop_cache", __dir__)
+
 Minitest::TestTask.create
 
 require "standard/rake"
 
-require "rb_sys/extensiontask"
-
-task build: :compile
-
-GEMSPEC = Gem::Specification.load("fit_kit.gemspec")
-
-RbSys::ExtensionTask.new("fit_kit", GEMSPEC) do |ext|
-  ext.lib_dir = "lib/fit_kit"
-end
-
-task default: %i[compile test standard]
+task default: %i[test standard]
