@@ -6,12 +6,15 @@
 /pkg/
 /spec/reports/
 /tmp/
+.rubocop_cache/
 *.bundle
 *.so
 *.o
 *.a
 mkmf.log
-target/
+.zig-cache/
+.zig-global-cache/
+zig-out/
 
 *.gem
 
