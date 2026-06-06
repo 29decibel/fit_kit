@@ -1,4 +1,5 @@
 const std = @import("std");
+const profile = @import("profile.zig");
 
 const c = @cImport({
     @cInclude("ruby.h");
@@ -84,15 +85,7 @@ const Scalar = union(enum) {
     }
 };
 
-const FieldInfo = struct {
-    name: []const u8,
-    units: []const u8 = "",
-    scale: f64 = 1.0,
-    offset: f64 = 0.0,
-    date_time: bool = false,
-    activity_type: bool = false,
-    fit_base_type: bool = false,
-};
+const FieldInfo = profile.FieldInfo;
 
 const DeveloperDescription = struct {
     base_type: BaseType,
@@ -474,7 +467,15 @@ const Parser = struct {
 
     fn buildRecordsHash(self: *Parser) VALUE {
         const hash = c.rb_hash_new();
+        for (public_known_kind_order) |kind| {
+            if (knownKindIndex(kind)) |index| {
+                if (self.groups[index] != Qnil) {
+                    _ = c.rb_hash_aset(hash, rbSym(kind), self.groups[index]);
+                }
+            }
+        }
         for (known_kinds, 0..) |kind, index| {
+            if (isPublicKnownKind(kind)) continue;
             if (self.groups[index] != Qnil) {
                 _ = c.rb_hash_aset(hash, rbSym(kind), self.groups[index]);
             }
@@ -500,7 +501,9 @@ const Parser = struct {
     }
 };
 
-const known_kinds = [_][]const u8{
+const known_kinds = profile.known_kinds;
+
+const public_known_kind_order = [_][]const u8{
     "activity",
     "developer_data_id",
     "device_info",
@@ -520,66 +523,19 @@ fn knownKindIndex(kind: []const u8) ?usize {
     return null;
 }
 
+fn isPublicKnownKind(kind: []const u8) bool {
+    for (public_known_kind_order) |known| {
+        if (std.mem.eql(u8, known, kind)) return true;
+    }
+    return false;
+}
+
 fn kindName(global_message_number: u16) ?[]const u8 {
-    return switch (global_message_number) {
-        0 => "file_id",
-        18 => "session",
-        19 => "lap",
-        20 => "record",
-        21 => "event",
-        23 => "device_info",
-        34 => "activity",
-        78 => "hrv",
-        206 => "field_description",
-        207 => "developer_data_id",
-        else => null,
-    };
+    return profile.kindName(global_message_number);
 }
 
 fn fieldInfo(message_number: u16, field_number: u8) ?FieldInfo {
-    return switch (message_number) {
-        0 => switch (field_number) {
-            4 => .{ .name = "time_created", .units = "s", .date_time = true },
-            253 => .{ .name = "timestamp", .units = "s", .date_time = true },
-            else => null,
-        },
-        18, 19, 21, 23, 34 => switch (field_number) {
-            253 => .{ .name = "timestamp", .units = "s", .date_time = true },
-            else => null,
-        },
-        78 => switch (field_number) {
-            0 => .{ .name = "time", .units = "s", .scale = 1000.0 },
-            else => null,
-        },
-        206 => switch (field_number) {
-            0 => .{ .name = "developer_data_index" },
-            1 => .{ .name = "field_definition_number" },
-            2 => .{ .name = "fit_base_type_id", .fit_base_type = true },
-            3 => .{ .name = "field_name" },
-            4 => .{ .name = "array" },
-            5 => .{ .name = "components" },
-            6 => .{ .name = "scale" },
-            7 => .{ .name = "offset" },
-            8 => .{ .name = "units" },
-            9 => .{ .name = "bits" },
-            10 => .{ .name = "accumulate" },
-            13 => .{ .name = "fit_base_unit_id" },
-            14 => .{ .name = "native_mesg_num" },
-            15 => .{ .name = "native_field_num" },
-            253 => .{ .name = "timestamp", .units = "s", .date_time = true },
-            else => null,
-        },
-        207 => switch (field_number) {
-            0 => .{ .name = "developer_id" },
-            1 => .{ .name = "application_id" },
-            2 => .{ .name = "manufacturer_id" },
-            3 => .{ .name = "developer_data_index" },
-            4 => .{ .name = "application_version" },
-            253 => .{ .name = "timestamp", .units = "s", .date_time = true },
-            else => null,
-        },
-        else => null,
-    };
+    return profile.fieldInfo(message_number, field_number);
 }
 
 fn recordFieldInfo(field_number: u8) ?FieldInfo {
@@ -596,7 +552,7 @@ fn recordFieldInfo(field_number: u8) ?FieldInfo {
         78 => .{ .name = "enhanced_altitude", .units = "m", .scale = 5.0, .offset = 500.0 },
         85 => .{ .name = "step_length", .units = "mm", .scale = 10.0 },
         253 => .{ .name = "timestamp", .units = "s", .date_time = true },
-        else => null,
+        else => profile.fieldInfo(20, field_number),
     };
 }
 
