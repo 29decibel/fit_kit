@@ -5,7 +5,7 @@ const c = @cImport({
 });
 
 const VALUE = c.VALUE;
-const Qnil: VALUE = 8;
+const Qnil: VALUE = c.RUBY_Qnil;
 const FIT_EPOCH_OFFSET: i64 = 631065600;
 
 var fit_parse_result_class: VALUE = Qnil;
@@ -260,7 +260,8 @@ const Parser = struct {
             const number = try self.readU8();
             const size = try self.readU8();
             const raw_base_type = try self.readU8();
-            const base_type: BaseType = @enumFromInt(@as(u5, @intCast(raw_base_type & 0x1f)));
+            var base_type: BaseType = @enumFromInt(@as(u5, @intCast(raw_base_type & 0x1f)));
+            if (size % baseTypeSize(base_type) != 0) base_type = .byte;
             fields.appendAssumeCapacity(.{ .number = number, .size = size, .base_type = base_type });
         }
 
@@ -302,7 +303,7 @@ const Parser = struct {
             const bytes = try self.readBytes(field.size);
             const scalar = parseScalar(field.base_type, bytes, endian);
             if (definition.global_message_number == 206) developer_description_builder.capture(field.number, scalar);
-            try self.addField(record, definition.global_message_number, field, scalar);
+            try self.addField(record, definition.global_message_number, field, bytes, endian);
         }
         if (definition.global_message_number == 206) {
             if (developer_description_builder.key()) |key| {
@@ -335,19 +336,21 @@ const Parser = struct {
         record: VALUE,
         global_message_number: u16,
         field: FieldDef,
-        scalar: Scalar,
+        bytes: []const u8,
+        endian: std.builtin.Endian,
     ) !void {
+        const scalar = parseScalar(field.base_type, bytes, endian);
         if (global_message_number == 20) {
-            try self.addRecordField(record, field, scalar);
+            try self.addRecordField(record, field, scalar, bytes, endian);
             return;
         }
 
         if (fieldInfo(global_message_number, field.number)) |info| {
-            addConvertedField(record, info, scalar);
+            addConvertedBytes(record, info, field.base_type, bytes, endian);
         } else {
             var name_buffer: [32]u8 = undefined;
             const name = std.fmt.bufPrintZ(&name_buffer, "unknown_{}", .{field.number}) catch return;
-            addPair(record, name, rbValue(scalar), "");
+            addPair(record, name, rbRawValue(field.base_type, bytes, endian), "");
         }
     }
 
@@ -361,16 +364,22 @@ const Parser = struct {
         const description = self.developer_descriptions.get(
             developerDescriptionKey(field.developer_data_index, field.field_number),
         ) orelse return error.MissingDeveloperDefinitionMessage;
-        const scalar = parseScalar(description.base_type, bytes, endian);
-        addConvertedField(record, .{
+        addConvertedBytes(record, .{
             .name = description.name,
             .units = description.units,
             .scale = description.scale,
             .offset = description.offset,
-        }, scalar);
+        }, description.base_type, bytes, endian);
     }
 
-    fn addRecordField(self: *Parser, record: VALUE, field: FieldDef, scalar: Scalar) !void {
+    fn addRecordField(
+        self: *Parser,
+        record: VALUE,
+        field: FieldDef,
+        scalar: Scalar,
+        bytes: []const u8,
+        endian: std.builtin.Endian,
+    ) !void {
         switch (field.number) {
             2 => if (scalar.toU64()) |raw| addPair(record, "enhanced_altitude", rbFloat(@as(f64, @floatFromInt(raw & 0xffff)) / 5.0 - 500.0), "m"),
             6 => if (scalar.toU64()) |raw| addPair(record, "enhanced_speed", rbFloat(@as(f64, @floatFromInt(raw & 0xffff)) / 1000.0), "m/s"),
@@ -378,14 +387,14 @@ const Parser = struct {
             28 => try self.addCompressedAccumulatedPower(record, scalar),
             else => {
                 if (recordFieldInfo(field.number)) |info| {
-                    addConvertedField(record, info, scalar);
+                    addConvertedBytes(record, info, field.base_type, bytes, endian);
                     if (field.number == 253) {
                         if (scalar.toU64()) |raw| self.base_timestamp = @as(i64, @intCast(raw)) + FIT_EPOCH_OFFSET;
                     }
                 } else {
                     var name_buffer: [32]u8 = undefined;
                     const name = std.fmt.bufPrintZ(&name_buffer, "unknown_{}", .{field.number}) catch return;
-                    addPair(record, name, rbValue(scalar), "");
+                    addPair(record, name, rbRawValue(field.base_type, bytes, endian), "");
                 }
             },
         }
@@ -470,6 +479,7 @@ const known_kinds = [_][]const u8{
     "event",
     "field_description",
     "file_id",
+    "hrv",
     "lap",
     "record",
     "session",
@@ -491,6 +501,7 @@ fn kindName(global_message_number: u16) ?[]const u8 {
         21 => "event",
         23 => "device_info",
         34 => "activity",
+        78 => "hrv",
         206 => "field_description",
         207 => "developer_data_id",
         else => null,
@@ -506,6 +517,10 @@ fn fieldInfo(message_number: u16, field_number: u8) ?FieldInfo {
         },
         18, 19, 21, 23, 34 => switch (field_number) {
             253 => .{ .name = "timestamp", .units = "s", .date_time = true },
+            else => null,
+        },
+        78 => switch (field_number) {
+            0 => .{ .name = "time", .units = "s", .scale = 1000.0 },
             else => null,
         },
         206 => switch (field_number) {
@@ -660,36 +675,106 @@ fn fitBaseTypeName(value: u8) []const u8 {
 }
 
 fn addConvertedField(record: VALUE, info: FieldInfo, scalar: Scalar) void {
+    addPair(record, info.name, rbConvertedScalar(info, scalar), info.units);
+}
+
+fn addConvertedBytes(
+    record: VALUE,
+    info: FieldInfo,
+    base_type: BaseType,
+    bytes: []const u8,
+    endian: std.builtin.Endian,
+) void {
+    addPair(record, info.name, rbConvertedValue(info, base_type, bytes, endian), info.units);
+}
+
+fn rbConvertedValue(info: FieldInfo, base_type: BaseType, bytes: []const u8, endian: std.builtin.Endian) VALUE {
+    if (base_type == .string) return rbConvertedScalar(info, parseScalar(base_type, bytes, endian));
+
+    const base_size = baseTypeSize(base_type);
+    if (bytes.len <= base_size) return rbConvertedScalar(info, parseScalar(base_type, bytes, endian));
+
+    const count = bytes.len / base_size;
+    const array = c.rb_ary_new_capa(@intCast(count));
+    var has_valid = false;
+    var index: usize = 0;
+    while (index < count) : (index += 1) {
+        const raw = bytes[index * base_size ..][0..base_size];
+        const value = rbConvertedElement(info, base_type, raw, endian);
+        if (isValidArrayElement(base_type, raw, endian)) has_valid = true;
+        _ = c.rb_ary_push(array, value);
+    }
+
+    return if (has_valid) array else Qnil;
+}
+
+fn rbConvertedElement(info: FieldInfo, base_type: BaseType, raw: []const u8, endian: std.builtin.Endian) VALUE {
+    if (base_type == .byte) return rbConvertedScalar(info, parseByteScalar(raw));
+    return rbConvertedScalar(info, parseScalar(base_type, raw, endian));
+}
+
+fn rbConvertedScalar(info: FieldInfo, scalar: Scalar) VALUE {
     if (info.activity_type) {
-        const value = scalar.toU64() orelse return;
-        addPair(record, info.name, rbString(activityTypeName(@intCast(value))), info.units);
-        return;
+        const value = scalar.toU64() orelse return Qnil;
+        return rbString(activityTypeName(@intCast(value)));
     }
 
     if (info.fit_base_type) {
-        const value = scalar.toU64() orelse return;
-        addPair(record, info.name, rbString(fitBaseTypeName(@intCast(value))), info.units);
-        return;
+        const value = scalar.toU64() orelse return Qnil;
+        return rbString(fitBaseTypeName(@intCast(value)));
     }
 
     if (info.date_time) {
-        const value = scalar.toU64() orelse return;
-        addPair(record, info.name, rbInt(@as(i64, @intCast(value)) + FIT_EPOCH_OFFSET), info.units);
-        return;
+        const value = scalar.toU64() orelse return Qnil;
+        return rbInt(@as(i64, @intCast(value)) + FIT_EPOCH_OFFSET);
     }
 
     if (scalar.toF64()) |value| {
         if (info.scale != 1.0 or info.offset != 0.0) {
-            addPair(record, info.name, rbFloat(value / info.scale - info.offset), info.units);
+            return rbFloat(value / info.scale - info.offset);
         } else {
-            addPair(record, info.name, rbValue(scalar), info.units);
+            return rbValue(scalar);
         }
-        return;
     }
 
     if (info.scale == 1.0 and info.offset == 0.0) {
-        addPair(record, info.name, rbValue(scalar), info.units);
+        return rbValue(scalar);
     }
+
+    return Qnil;
+}
+
+fn rbRawValue(base_type: BaseType, bytes: []const u8, endian: std.builtin.Endian) VALUE {
+    if (base_type == .string) return rbValue(parseScalar(base_type, bytes, endian));
+
+    const base_size = baseTypeSize(base_type);
+    if (bytes.len <= base_size) return rbValue(parseScalar(base_type, bytes, endian));
+
+    const count = bytes.len / base_size;
+    const array = c.rb_ary_new_capa(@intCast(count));
+    var has_valid = false;
+    var index: usize = 0;
+    while (index < count) : (index += 1) {
+        const raw = bytes[index * base_size ..][0..base_size];
+        const scalar = if (base_type == .byte) parseByteScalar(raw) else parseScalar(base_type, raw, endian);
+        const value = rbValue(scalar);
+        if (isValidArrayElement(base_type, raw, endian)) has_valid = true;
+        _ = c.rb_ary_push(array, value);
+    }
+
+    return if (has_valid) array else Qnil;
+}
+
+fn parseByteScalar(raw: []const u8) Scalar {
+    if (raw.len == 0) return .none;
+    return .{ .unsigned = raw[0] };
+}
+
+fn isValidArrayElement(base_type: BaseType, raw: []const u8, endian: std.builtin.Endian) bool {
+    return switch (base_type) {
+        .byte => raw.len > 0 and raw[0] != 0xff,
+        else => !isInvalid(base_type, raw, endian),
+    };
 }
 
 fn activityTypeName(value: u8) []const u8 {
@@ -769,6 +854,11 @@ fn fit_kit_parse_fit_file(_: VALUE, path_value: VALUE) callconv(.c) VALUE {
         return raiseRuntime(@errorName(err));
     };
     defer parser.deinit();
+
+    const gc_was_disabled = c.rb_gc_disable();
+    defer {
+        if (gc_was_disabled == 0) _ = c.rb_gc_enable();
+    }
 
     return parser.parse() catch |err| {
         return raiseRuntime(@errorName(err));

@@ -45,6 +45,14 @@ class TestFitparseRsParity < Minitest::Test
     assert_equal({units: "doughnuts", value: 1}, field)
   end
 
+  def test_hrv_time_array
+    result = FitKit.parse_fit_file(fixture_path("hrv-activity.fit"))
+    hrv_record = result.instance_variable_get(:@records).find { |record| record.fetch(:kind) == :hrv }
+    field = hrv_record.fetch(:fields).fetch(:time)
+
+    assert_equal({units: "s", value: [0.467, 0.464, nil, nil, nil]}, field)
+  end
+
   private
 
   def fixture_path(fixture)
